@@ -2,14 +2,7 @@
 # IoskeleyMono — private-build-plans.toml
 # Fork of https://github.com/ahatem/IoskeleyMono
 #
-# Fixes applied:
-#   - spacing = "term" em todas as variantes
-#   - serifs = "slab" em todas as variantes
-#   - Variantes de números/símbolos removidas (incompatíveis com slab)
-#   - Variantes de letras sem sufixo -serifless (slab aplica serifas)
-#   - metricOverride removido (blend() incompatível com v34)
-#   - IoskeleyMonoTerm removido (redundante)
-#   - IoskeleyMonoFixed adicionado com spacing = "fixed"
+# v1.0.4 — sem variants.design, confirma que slab builda limpo
 # ============================================================
 
 [buildPlans.IoskeleyMono]
@@ -18,93 +11,6 @@ spacing = "term"
 serifs = "slab"
 noCvSs = true
 exportGlyphNames = false
-
-[buildPlans.IoskeleyMono.variants.design]
-# Letras maiúsculas — sem sufixo serifless, slab aplica serifas
-capital-a = "straight"
-capital-b = "standard"
-capital-c = "bilateral-inward-serifed"
-capital-d = "standard"
-capital-e = "standard"
-capital-f = "standard"
-capital-g = "toothless-corner-inward-serifed-hooked"
-capital-h = "standard"
-capital-i = "serifed"
-capital-j = "standard"
-capital-k = "symmetric-touching"
-capital-l = "standard"
-capital-m = "hanging"
-capital-n = "standard"
-capital-p = "closed"
-capital-q = "crossing"
-capital-r = "standing"
-capital-s = "standard"
-capital-t = "standard"
-capital-u = "toothless-rounded"
-capital-v = "straight"
-capital-w = "straight-flat-top"
-capital-x = "straight"
-capital-y = "straight"
-capital-z = "straight"
-
-# Letras minúsculas — sem sufixo serifless
-a = "double-storey"
-b = "toothed"
-c = "bilateral-inward-serifed"
-d = "toothed"
-e = "flat-crossbar"
-g = "single-storey"
-h = "straight"
-i = "serifed"
-j = "flat-hook-serifed"
-k = "symmetric-touching"
-l = "serifed"
-m = "standard"
-n = "straight"
-p = "eared"
-q = "straight"
-r = "hookless"
-s = "standard"
-u = "toothed"
-v = "straight"
-w = "straight-flat-top"
-x = "straight"
-y = "straight"
-z = "straight"
-
-# Símbolos que não têm conflito com slab
-lower-theta = "oval"
-tittle = "square"
-diacritic-dot = "square"
-punctuation-dot = "square"
-tilde = "low"
-asterisk = "penta-mid"
-underscore = "high"
-caret = "medium"
-ascii-grave = "straight"
-ascii-single-quote = "straight"
-paren = "flat-arc"
-brace = "curly-flat-boundary"
-guillemet = "straight"
-number-sign = "slanted"
-ampersand = "closed"
-at = "fourfold"
-dollar = "through"
-percent = "rings-continuous-slash"
-bar = "natural-slope"
-question = "corner"
-decorative-angle-brackets = "middle"
-lig-ltgteq = "slanted"
-lig-neq = "slightly-slanted"
-lig-equal-chain = "without-notch"
-lig-hyphen-chain = "without-notch"
-lig-plus-chain = "without-notch"
-lig-double-arrow-bar = "without-notch"
-lig-single-arrow-bar = "without-notch"
-
-# ============================================================
-# WEIGHTS
-# ============================================================
 
 [buildPlans.IoskeleyMono.weights.Thin]
 shape = 100
@@ -156,10 +62,6 @@ shape = 900
 menu = 900
 css = 900
 
-# ============================================================
-# WIDTHS
-# ============================================================
-
 [buildPlans.IoskeleyMono.widths.Condensed]
 shape = 480
 menu = 3
@@ -175,10 +77,6 @@ shape = 600
 menu = 5
 css = "normal"
 
-# ============================================================
-# SLOPES
-# ============================================================
-
 [buildPlans.IoskeleyMono.slopes.Upright]
 angle = 0
 shape = "upright"
@@ -190,10 +88,6 @@ angle = 11.8
 shape = "italic"
 menu = "italic"
 css = "italic"
-
-# ============================================================
-# NL VARIANT (No Ligatures)
-# ============================================================
 
 [buildPlans.IoskeleyMonoNL]
 family = "Ioskeley Mono NL"
@@ -207,13 +101,6 @@ weights.inherits = "buildPlans.IoskeleyMono"
 widths.inherits = "buildPlans.IoskeleyMono"
 slopes.inherits = "buildPlans.IoskeleyMono"
 
-[buildPlans.IoskeleyMonoNL.variants]
-inherits = "buildPlans.IoskeleyMono"
-
-# ============================================================
-# FIXED VARIANT
-# ============================================================
-
 [buildPlans.IoskeleyMonoFixed]
 family = "Ioskeley Mono Fixed"
 spacing = "fixed"
@@ -224,6 +111,3 @@ exportGlyphNames = false
 weights.inherits = "buildPlans.IoskeleyMono"
 widths.inherits = "buildPlans.IoskeleyMono"
 slopes.inherits = "buildPlans.IoskeleyMono"
-
-[buildPlans.IoskeleyMonoFixed.variants]
-inherits = "buildPlans.IoskeleyMono"
