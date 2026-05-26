@@ -5,9 +5,10 @@
 # Fixes applied:
 #   - spacing = "term" em todas as variantes
 #   - serifs = "slab" em todas as variantes
-#   - Removidas variantes "-serifless" que conflitam com slab
-#   - Removido metricOverride com blend() incompatível
-#   - IoskeleyMonoTerm removido (redundante, todas já são term)
+#   - Variantes de números/símbolos removidas (incompatíveis com slab)
+#   - Variantes de letras sem sufixo -serifless (slab aplica serifas)
+#   - metricOverride removido (blend() incompatível com v34)
+#   - IoskeleyMonoTerm removido (redundante)
 #   - IoskeleyMonoFixed adicionado com spacing = "fixed"
 # ============================================================
 
@@ -19,17 +20,7 @@ noCvSs = true
 exportGlyphNames = false
 
 [buildPlans.IoskeleyMono.variants.design]
-one = "no-base"
-two = "straight-neck"
-three = "flat-top"
-four = "semi-open"
-five = "oblique-flat"
-six = "open-contour"
-seven = "straight"
-eight = "two-circles"
-nine = "open-contour"
-zero = "dotted"
-
+# Letras maiúsculas — sem sufixo serifless, slab aplica serifas
 capital-a = "straight"
 capital-b = "standard"
 capital-c = "bilateral-inward-serifed"
@@ -56,12 +47,12 @@ capital-x = "straight"
 capital-y = "straight"
 capital-z = "straight"
 
+# Letras minúsculas — sem sufixo serifless
 a = "double-storey"
 b = "toothed"
 c = "bilateral-inward-serifed"
 d = "toothed"
 e = "flat-crossbar"
-f = "flat-hook-crossbar-at-x-height"
 g = "single-storey"
 h = "straight"
 i = "serifed"
@@ -74,7 +65,6 @@ p = "eared"
 q = "straight"
 r = "hookless"
 s = "standard"
-t = "flat-hook-short-neck2"
 u = "toothed"
 v = "straight"
 w = "straight-flat-top"
@@ -82,11 +72,11 @@ x = "straight"
 y = "straight"
 z = "straight"
 
+# Símbolos que não têm conflito com slab
 lower-theta = "oval"
 tittle = "square"
 diacritic-dot = "square"
 punctuation-dot = "square"
-braille-dot = "square"
 tilde = "low"
 asterisk = "penta-mid"
 underscore = "high"
@@ -100,11 +90,9 @@ number-sign = "slanted"
 ampersand = "closed"
 at = "fourfold"
 dollar = "through"
-cent = "through-cap"
 percent = "rings-continuous-slash"
 bar = "natural-slope"
 question = "corner"
-pilcrow = "high"
 decorative-angle-brackets = "middle"
 lig-ltgteq = "slanted"
 lig-neq = "slightly-slanted"
@@ -113,6 +101,10 @@ lig-hyphen-chain = "without-notch"
 lig-plus-chain = "without-notch"
 lig-double-arrow-bar = "without-notch"
 lig-single-arrow-bar = "without-notch"
+
+# ============================================================
+# WEIGHTS
+# ============================================================
 
 [buildPlans.IoskeleyMono.weights.Thin]
 shape = 100
@@ -164,6 +156,10 @@ shape = 900
 menu = 900
 css = 900
 
+# ============================================================
+# WIDTHS
+# ============================================================
+
 [buildPlans.IoskeleyMono.widths.Condensed]
 shape = 480
 menu = 3
@@ -178,6 +174,10 @@ css = "semi-condensed"
 shape = 600
 menu = 5
 css = "normal"
+
+# ============================================================
+# SLOPES
+# ============================================================
 
 [buildPlans.IoskeleyMono.slopes.Upright]
 angle = 0
@@ -211,7 +211,7 @@ slopes.inherits = "buildPlans.IoskeleyMono"
 inherits = "buildPlans.IoskeleyMono"
 
 # ============================================================
-# FIXED VARIANT (spacing mais estrito)
+# FIXED VARIANT
 # ============================================================
 
 [buildPlans.IoskeleyMonoFixed]
