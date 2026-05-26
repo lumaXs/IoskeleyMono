@@ -1,7 +1,5 @@
 name: Build and Release Font
 
-# Triggered by version tags (e.g. v2.0.0)
-# To release: git tag v2.0.0 && git push origin v2.0.0
 on:
   push:
     tags:
@@ -33,19 +31,20 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ttfautohint python3 fontforge
+          sudo apt-get install -y ttfautohint python3 python3-pip fontforge
+          pip3 install fonttools --break-system-packages
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Build font
         run: |
           cp private-build-plans.toml iosevka-src/
           cd iosevka-src
           npm install
-          npm run build -- contents::IoskeleyMono contents::IoskeleyMonoTerm contents::IoskeleyMonoNL
+          npm run build -- contents::IoskeleyMono contents::IoskeleyMonoNL contents::IoskeleyMonoFixed
 
       - name: Verify build output
         run: |
@@ -53,12 +52,12 @@ jobs:
             echo "IoskeleyMono build output not found!"
             exit 1
           fi
-          if [ ! -d "iosevka-src/dist/IoskeleyMonoTerm/TTF" ]; then
-            echo "IoskeleyMonoTerm build output not found!"
-            exit 1
-          fi
           if [ ! -d "iosevka-src/dist/IoskeleyMonoNL/TTF" ]; then
             echo "IoskeleyMonoNL build output not found!"
+            exit 1
+          fi
+          if [ ! -d "iosevka-src/dist/IoskeleyMonoFixed/TTF" ]; then
+            echo "IoskeleyMonoFixed build output not found!"
             exit 1
           fi
 
@@ -69,132 +68,133 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Iosevka encodes the width inside the weight name:
-      #   Normal        → IoskeleyMono-{Weight}.ttf
-      #   SemiCondensed → IoskeleyMono-SemiCondensed{Weight}.ttf
-      #   Condensed     → IoskeleyMono-Condensed{Weight}.ttf
       - name: Patch fonts with Nerd Font glyphs
         run: |
           mkdir -p patched-fonts/Normal patched-fonts/SemiCondensed patched-fonts/Condensed
-          mkdir -p patched-fonts-term/Normal patched-fonts-term/SemiCondensed patched-fonts-term/Condensed
+          mkdir -p patched-fonts-fixed/Normal patched-fonts-fixed/SemiCondensed patched-fonts-fixed/Condensed
           mkdir -p patched-fonts-nl/Normal patched-fonts-nl/SemiCondensed patched-fonts-nl/Condensed
+
           DIST="iosevka-src/dist/IoskeleyMono/TTF"
-          DIST_TERM="iosevka-src/dist/IoskeleyMonoTerm/TTF"
+          DIST_FIXED="iosevka-src/dist/IoskeleyMonoFixed/TTF"
           DIST_NL="iosevka-src/dist/IoskeleyMonoNL/TTF"
           PATCHER="nerd-fonts-patcher/font-patcher"
 
+          # IoskeleyMono
           for font in "$DIST"/IoskeleyMono-SemiCondensed*.ttf; do
             fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts/SemiCondensed
           done
-
           for font in "$DIST"/IoskeleyMono-Condensed*.ttf; do
             [[ "$font" == *SemiCondensed* ]] && continue
             fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts/Condensed
           done
-
           for font in "$DIST"/IoskeleyMono-*.ttf; do
             [[ "$font" == *Condensed* ]] && continue
             fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts/Normal
           done
 
-          for font in "$DIST_TERM"/IoskeleyMonoTerm-SemiCondensed*.ttf; do
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-term/SemiCondensed
+          # IoskeleyMonoFixed
+          for font in "$DIST_FIXED"/IoskeleyMonoFixed-SemiCondensed*.ttf; do
+            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-fixed/SemiCondensed
           done
-
-          for font in "$DIST_TERM"/IoskeleyMonoTerm-Condensed*.ttf; do
+          for font in "$DIST_FIXED"/IoskeleyMonoFixed-Condensed*.ttf; do
             [[ "$font" == *SemiCondensed* ]] && continue
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-term/Condensed
+            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-fixed/Condensed
           done
-
-          for font in "$DIST_TERM"/IoskeleyMonoTerm-*.ttf; do
+          for font in "$DIST_FIXED"/IoskeleyMonoFixed-*.ttf; do
             [[ "$font" == *Condensed* ]] && continue
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-term/Normal
+            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-fixed/Normal
           done
 
+          # IoskeleyMonoNL
           for font in "$DIST_NL"/IoskeleyMonoNL-SemiCondensed*.ttf; do
             fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-nl/SemiCondensed
           done
-
           for font in "$DIST_NL"/IoskeleyMonoNL-Condensed*.ttf; do
             [[ "$font" == *SemiCondensed* ]] && continue
             fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-nl/Condensed
           done
-
           for font in "$DIST_NL"/IoskeleyMonoNL-*.ttf; do
             [[ "$font" == *Condensed* ]] && continue
             fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-nl/Normal
           done
 
+      - name: Fix Nerd Font icon sizes
+        run: |
+          cp fix-nerd-fonts.py /tmp/fix-nerd-fonts.py
+
+          python3 /tmp/fix-nerd-fonts.py patched-fonts         patched-fonts-fixed-icons
+          python3 /tmp/fix-nerd-fonts.py patched-fonts-fixed   patched-fonts-fixed-fixed-icons
+          python3 /tmp/fix-nerd-fonts.py patched-fonts-nl      patched-fonts-nl-fixed-icons
+
+          rm -rf patched-fonts patched-fonts-fixed patched-fonts-nl
+          mv patched-fonts-fixed-icons       patched-fonts
+          mv patched-fonts-fixed-fixed-icons patched-fonts-fixed
+          mv patched-fonts-nl-fixed-icons    patched-fonts-nl
+
       - name: Package release archives
         run: |
           DIST="iosevka-src/dist/IoskeleyMono"
-          DIST_TERM="iosevka-src/dist/IoskeleyMonoTerm"
+          DIST_FIXED="iosevka-src/dist/IoskeleyMonoFixed"
+          DIST_NL="iosevka-src/dist/IoskeleyMonoNL"
 
-          # ── IoskeleyMono.zip — all widths, TTF hinted + unhinted ──────────
-          mkdir -p pkg/Normal/Hinted      pkg/Normal/Unhinted
+          # ── IoskeleyMono.zip ──────────────────────────────────────────────
+          mkdir -p pkg/Normal/Hinted        pkg/Normal/Unhinted
           mkdir -p pkg/SemiCondensed/Hinted pkg/SemiCondensed/Unhinted
-          mkdir -p pkg/Condensed/Hinted   pkg/Condensed/Unhinted
+          mkdir -p pkg/Condensed/Hinted     pkg/Condensed/Unhinted
 
           cp "$DIST"/TTF/IoskeleyMono-SemiCondensed*.ttf          pkg/SemiCondensed/Hinted/
           cp "$DIST"/TTF-Unhinted/IoskeleyMono-SemiCondensed*.ttf pkg/SemiCondensed/Unhinted/
-
-          for f in "$DIST"/TTF/IoskeleyMono-Condensed*.ttf;          do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg/Condensed/Hinted/;    done
-          for f in "$DIST"/TTF-Unhinted/IoskeleyMono-Condensed*.ttf; do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg/Condensed/Unhinted/;  done
-          for f in "$DIST"/TTF/IoskeleyMono-*.ttf;                   do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg/Normal/Hinted/;        done
-          for f in "$DIST"/TTF-Unhinted/IoskeleyMono-*.ttf;          do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg/Normal/Unhinted/;      done
-
+          for f in "$DIST"/TTF/IoskeleyMono-Condensed*.ttf;          do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg/Condensed/Hinted/;   done
+          for f in "$DIST"/TTF-Unhinted/IoskeleyMono-Condensed*.ttf; do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg/Condensed/Unhinted/; done
+          for f in "$DIST"/TTF/IoskeleyMono-*.ttf;                   do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg/Normal/Hinted/;       done
+          for f in "$DIST"/TTF-Unhinted/IoskeleyMono-*.ttf;          do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg/Normal/Unhinted/;     done
           cd pkg && zip -r ../IoskeleyMono.zip . && cd ..
 
-          # ── IoskeleyMono-NerdFont.zip — all widths, Nerd Font patched ─────
+          # ── IoskeleyMono-NerdFont.zip ─────────────────────────────────────
           mkdir -p pkg-nf/Normal pkg-nf/SemiCondensed pkg-nf/Condensed
-          cp patched-fonts/Normal/*.ttf         pkg-nf/Normal/
-          cp patched-fonts/SemiCondensed/*.ttf  pkg-nf/SemiCondensed/
-          cp patched-fonts/Condensed/*.ttf      pkg-nf/Condensed/
+          cp patched-fonts/Normal/*.ttf        pkg-nf/Normal/
+          cp patched-fonts/SemiCondensed/*.ttf pkg-nf/SemiCondensed/
+          cp patched-fonts/Condensed/*.ttf     pkg-nf/Condensed/
           cd pkg-nf && zip -r ../IoskeleyMono-NerdFont.zip . && cd ..
 
-          # ── IoskeleyMono-Term.zip — all widths, term spacing ──────────────
-          mkdir -p pkg-term/Normal/Hinted      pkg-term/Normal/Unhinted
-          mkdir -p pkg-term/SemiCondensed/Hinted pkg-term/SemiCondensed/Unhinted
-          mkdir -p pkg-term/Condensed/Hinted   pkg-term/Condensed/Unhinted
+          # ── IoskeleyMono-Fixed.zip ────────────────────────────────────────
+          mkdir -p pkg-fixed/Normal/Hinted        pkg-fixed/Normal/Unhinted
+          mkdir -p pkg-fixed/SemiCondensed/Hinted pkg-fixed/SemiCondensed/Unhinted
+          mkdir -p pkg-fixed/Condensed/Hinted     pkg-fixed/Condensed/Unhinted
 
-          cp "$DIST_TERM"/TTF/IoskeleyMonoTerm-SemiCondensed*.ttf          pkg-term/SemiCondensed/Hinted/
-          cp "$DIST_TERM"/TTF-Unhinted/IoskeleyMonoTerm-SemiCondensed*.ttf pkg-term/SemiCondensed/Unhinted/
+          cp "$DIST_FIXED"/TTF/IoskeleyMonoFixed-SemiCondensed*.ttf          pkg-fixed/SemiCondensed/Hinted/
+          cp "$DIST_FIXED"/TTF-Unhinted/IoskeleyMonoFixed-SemiCondensed*.ttf pkg-fixed/SemiCondensed/Unhinted/
+          for f in "$DIST_FIXED"/TTF/IoskeleyMonoFixed-Condensed*.ttf;          do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-fixed/Condensed/Hinted/;   done
+          for f in "$DIST_FIXED"/TTF-Unhinted/IoskeleyMonoFixed-Condensed*.ttf; do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-fixed/Condensed/Unhinted/; done
+          for f in "$DIST_FIXED"/TTF/IoskeleyMonoFixed-*.ttf;                   do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-fixed/Normal/Hinted/;       done
+          for f in "$DIST_FIXED"/TTF-Unhinted/IoskeleyMonoFixed-*.ttf;          do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-fixed/Normal/Unhinted/;     done
+          cd pkg-fixed && zip -r ../IoskeleyMono-Fixed.zip . && cd ..
 
-          for f in "$DIST_TERM"/TTF/IoskeleyMonoTerm-Condensed*.ttf;          do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-term/Condensed/Hinted/;   done
-          for f in "$DIST_TERM"/TTF-Unhinted/IoskeleyMonoTerm-Condensed*.ttf; do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-term/Condensed/Unhinted/; done
-          for f in "$DIST_TERM"/TTF/IoskeleyMonoTerm-*.ttf;                   do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-term/Normal/Hinted/;       done
-          for f in "$DIST_TERM"/TTF-Unhinted/IoskeleyMonoTerm-*.ttf;          do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-term/Normal/Unhinted/;     done
+          # ── IoskeleyMono-Fixed-NerdFont.zip ──────────────────────────────
+          mkdir -p pkg-fixed-nf/Normal pkg-fixed-nf/SemiCondensed pkg-fixed-nf/Condensed
+          cp patched-fonts-fixed/Normal/*.ttf        pkg-fixed-nf/Normal/
+          cp patched-fonts-fixed/SemiCondensed/*.ttf pkg-fixed-nf/SemiCondensed/
+          cp patched-fonts-fixed/Condensed/*.ttf     pkg-fixed-nf/Condensed/
+          cd pkg-fixed-nf && zip -r ../IoskeleyMono-Fixed-NerdFont.zip . && cd ..
 
-          cd pkg-term && zip -r ../IoskeleyMono-Term.zip . && cd ..
-
-          # ── IoskeleyMono-NL.zip — all widths, no ligatures ────────────────
-          DIST_NL="iosevka-src/dist/IoskeleyMonoNL"
-          mkdir -p pkg-nl/Normal/Hinted      pkg-nl/Normal/Unhinted
+          # ── IoskeleyMono-NL.zip ───────────────────────────────────────────
+          mkdir -p pkg-nl/Normal/Hinted        pkg-nl/Normal/Unhinted
           mkdir -p pkg-nl/SemiCondensed/Hinted pkg-nl/SemiCondensed/Unhinted
-          mkdir -p pkg-nl/Condensed/Hinted   pkg-nl/Condensed/Unhinted
+          mkdir -p pkg-nl/Condensed/Hinted     pkg-nl/Condensed/Unhinted
 
           cp "$DIST_NL"/TTF/IoskeleyMonoNL-SemiCondensed*.ttf          pkg-nl/SemiCondensed/Hinted/
           cp "$DIST_NL"/TTF-Unhinted/IoskeleyMonoNL-SemiCondensed*.ttf pkg-nl/SemiCondensed/Unhinted/
-
           for f in "$DIST_NL"/TTF/IoskeleyMonoNL-Condensed*.ttf;          do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-nl/Condensed/Hinted/;   done
           for f in "$DIST_NL"/TTF-Unhinted/IoskeleyMonoNL-Condensed*.ttf; do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-nl/Condensed/Unhinted/; done
           for f in "$DIST_NL"/TTF/IoskeleyMonoNL-*.ttf;                   do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-nl/Normal/Hinted/;       done
           for f in "$DIST_NL"/TTF-Unhinted/IoskeleyMonoNL-*.ttf;          do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-nl/Normal/Unhinted/;     done
-
           cd pkg-nl && zip -r ../IoskeleyMono-NL.zip . && cd ..
 
-          # ── IoskeleyMono-Term-NerdFont.zip — term spacing + Nerd Font ─────
-          mkdir -p pkg-term-nf/Normal pkg-term-nf/SemiCondensed pkg-term-nf/Condensed
-          cp patched-fonts-term/Normal/*.ttf         pkg-term-nf/Normal/
-          cp patched-fonts-term/SemiCondensed/*.ttf  pkg-term-nf/SemiCondensed/
-          cp patched-fonts-term/Condensed/*.ttf      pkg-term-nf/Condensed/
-          cd pkg-term-nf && zip -r ../IoskeleyMono-Term-NerdFont.zip . && cd ..
-
-          # ── IoskeleyMono-NL-NerdFont.zip — no ligatures + Nerd Font ───────
+          # ── IoskeleyMono-NL-NerdFont.zip ──────────────────────────────────
           mkdir -p pkg-nl-nf/Normal pkg-nl-nf/SemiCondensed pkg-nl-nf/Condensed
-          cp patched-fonts-nl/Normal/*.ttf         pkg-nl-nf/Normal/
-          cp patched-fonts-nl/SemiCondensed/*.ttf  pkg-nl-nf/SemiCondensed/
-          cp patched-fonts-nl/Condensed/*.ttf      pkg-nl-nf/Condensed/
+          cp patched-fonts-nl/Normal/*.ttf        pkg-nl-nf/Normal/
+          cp patched-fonts-nl/SemiCondensed/*.ttf pkg-nl-nf/SemiCondensed/
+          cp patched-fonts-nl/Condensed/*.ttf     pkg-nl-nf/Condensed/
           cd pkg-nl-nf && zip -r ../IoskeleyMono-NL-NerdFont.zip . && cd ..
 
       - name: Package Web archive
@@ -230,18 +230,18 @@ jobs:
             |---|---|
             | Editor / IDE | `IoskeleyMono.zip` |
             | Terminal with icons | `IoskeleyMono-NerdFont.zip` |
-            | Terminal rendering issues | `IoskeleyMono-Term.zip` |
-            | Terminal icons + rendering issues | `IoskeleyMono-Term-NerdFont.zip` |
+            | Stricter terminal rendering | `IoskeleyMono-Fixed.zip` |
+            | Stricter terminal + icons | `IoskeleyMono-Fixed-NerdFont.zip` |
             | App that can't disable ligatures | `IoskeleyMono-NL.zip` |
             | Same + Nerd Font icons | `IoskeleyMono-NL-NerdFont.zip` |
             | Web | `IoskeleyMono-Web.zip` |
 
-            Not sure which to pick? [See the README](https://github.com/ahatem/IoskeleyMono#which-file-do-i-need).
+            Not sure which to pick? [See the README](https://github.com/lumaXs/IoskeleyMono#which-file-do-i-need).
           files: |
             IoskeleyMono.zip
             IoskeleyMono-NerdFont.zip
-            IoskeleyMono-Term.zip
-            IoskeleyMono-Term-NerdFont.zip
+            IoskeleyMono-Fixed.zip
+            IoskeleyMono-Fixed-NerdFont.zip
             IoskeleyMono-NL.zip
             IoskeleyMono-NL-NerdFont.zip
             IoskeleyMono-Web.zip

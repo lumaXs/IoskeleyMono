@@ -5,10 +5,9 @@
 # Fixes applied:
 #   - spacing = "term" em todas as variantes
 #   - serifs = "slab" em todas as variantes
-#   - Removidas variantes "-serifless" do design que
-#     conflitam com serifs = "slab" e causam Invalid proxy type
+#   - Removidas variantes "-serifless" que conflitam com slab
 #   - Removido metricOverride com blend() incompatível
-#   - IoskeleyMonoTerm removido (redundante)
+#   - IoskeleyMonoTerm removido (redundante, todas já são term)
 #   - IoskeleyMonoFixed adicionado com spacing = "fixed"
 # ============================================================
 
@@ -115,10 +114,6 @@ lig-plus-chain = "without-notch"
 lig-double-arrow-bar = "without-notch"
 lig-single-arrow-bar = "without-notch"
 
-# ============================================================
-# WEIGHTS
-# ============================================================
-
 [buildPlans.IoskeleyMono.weights.Thin]
 shape = 100
 menu = 100
@@ -169,10 +164,6 @@ shape = 900
 menu = 900
 css = 900
 
-# ============================================================
-# WIDTHS
-# ============================================================
-
 [buildPlans.IoskeleyMono.widths.Condensed]
 shape = 480
 menu = 3
@@ -187,10 +178,6 @@ css = "semi-condensed"
 shape = 600
 menu = 5
 css = "normal"
-
-# ============================================================
-# SLOPES
-# ============================================================
 
 [buildPlans.IoskeleyMono.slopes.Upright]
 angle = 0
@@ -224,7 +211,7 @@ slopes.inherits = "buildPlans.IoskeleyMono"
 inherits = "buildPlans.IoskeleyMono"
 
 # ============================================================
-# FIXED VARIANT
+# FIXED VARIANT (spacing mais estrito)
 # ============================================================
 
 [buildPlans.IoskeleyMonoFixed]
