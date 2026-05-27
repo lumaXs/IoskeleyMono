@@ -32,7 +32,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: iosevka-src/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
