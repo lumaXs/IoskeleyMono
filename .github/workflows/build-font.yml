@@ -13,11 +13,6 @@ concurrency:
 permissions:
   contents: write
 
-env:
-  FONT_NAME: IoskeleyMono
-  NODE_VERSION: 22
-  PYTHON_VERSION: '3.12'
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,86 +22,49 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Checkout Iosevka source
+        uses: actions/checkout@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          repository: be5invis/Iosevka
+          path: iosevka-src
+          fetch-depth: 1
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            zip unzip xz-utils p7zip-full \
-            fontforge python3-fontforge ttfautohint
+          sudo apt-get update
+          sudo apt-get install -y ttfautohint python3 python3-pip fontforge
+          pip3 install fonttools --break-system-packages
 
-      - name: Install Python dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build font
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install fonttools brotli zopfli
-
-      - name: Clone Iosevka source
-        run: |
-          git clone --depth=1 \
-            https://github.com/be5invis/Iosevka.git \
-            iosevka-src
-
-      - name: Install npm dependencies
-        working-directory: iosevka-src
-        run: npm install
-
-      - name: Copy private build plans
-        run: cp private-build-plans.toml iosevka-src/
-
-      # ── Validação rápida — só Regular SemiCondensed Upright ────────────
-      - name: Validate build configuration
-        working-directory: iosevka-src
-        run: |
-          echo "Fast validation: Regular SemiCondensed Upright only..."
-          npm run build -- \
-            "ttf::IoskeleyMono{weight=Regular,width=SemiCondensed,slope=Upright}"
-          echo "Validation passed."
-
-      - name: Clean validation artifacts
-        run: rm -rf iosevka-src/dist
-
-      # ── Build completo ──────────────────────────────────────────────────
-      - name: Build all font families
-        working-directory: iosevka-src
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-        run: |
+          cp private-build-plans.toml iosevka-src/
+          cd iosevka-src
+          npm install
           npm run build -- \
             ttf::IoskeleyMono \
             ttf::IoskeleyMonoNL \
             ttf::IoskeleyMonoFixed
 
-      - name: Verify output structure
+      - name: Verify build output
         run: |
           test -d iosevka-src/dist/IoskeleyMono/TTF
           test -d iosevka-src/dist/IoskeleyMonoNL/TTF
           test -d iosevka-src/dist/IoskeleyMonoFixed/TTF
           echo "Build output verified."
 
-      # ── Nerd Fonts patcher ──────────────────────────────────────────────
       - name: Download Nerd Fonts patcher
         run: |
-          NF_VERSION=$(gh api repos/ryanoasis/nerd-fonts/releases/latest \
-            --jq '.tag_name')
-          echo "Nerd Fonts patcher $NF_VERSION"
-          curl -sL \
-            "https://github.com/ryanoasis/nerd-fonts/releases/download/${NF_VERSION}/FontPatcher.zip" \
-            -o FontPatcher.zip
+          curl -sL "$(gh api repos/ryanoasis/nerd-fonts/releases/latest --jq '.assets[] | select(.name == "FontPatcher.zip") | .browser_download_url')" -o FontPatcher.zip
           unzip -q FontPatcher.zip -d nerd-fonts-patcher
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Patch paralelo ──────────────────────────────────────────────────
-      - name: Patch Nerd Fonts
+      - name: Patch fonts with Nerd Font glyphs
         shell: bash
         run: |
           set -e
@@ -123,8 +81,7 @@ jobs:
               -maxdepth 1 -type f -name "*.ttf" \
               | while read FONT; do
                 fontforge -script "$PATCHER" \
-                  "$FONT" \
-                  --complete --quiet --no-progressbars \
+                  "$FONT" --complete --careful \
                   --outputdir "patched/$FAMILY" 2>/dev/null
               done
             echo "Done: $FAMILY"
@@ -132,27 +89,17 @@ jobs:
 
           export -f patch_family
 
-          patch_family "IoskeleyMono"    &
-          patch_family "IoskeleyMonoNL"  &
+          patch_family "IoskeleyMono"      &
+          patch_family "IoskeleyMonoNL"    &
           patch_family "IoskeleyMonoFixed" &
           wait
           echo "All families patched."
 
-      # ── Fix icon sizes ──────────────────────────────────────────────────
       - name: Fix Nerd Font icon sizes
         run: |
           mkdir -p fixed
-          python fix-nerd-fonts.py patched fixed
-          echo "Icon sizes fixed."
+          python3 fix-nerd-fonts.py patched fixed
 
-      - name: Verify patched fonts
-        run: |
-          test -d fixed/IoskeleyMono
-          test -d fixed/IoskeleyMonoNL
-          test -d fixed/IoskeleyMonoFixed
-          echo "Patched fonts verified."
-
-      # ── Empacota flat (sem Hinted/Unhinted) ─────────────────────────────
       - name: Package release archives
         shell: bash
         run: |
@@ -162,15 +109,11 @@ jobs:
           package_family () {
             FAMILY="$1"
             echo "Packaging $FAMILY..."
-
-            # Copia todos os TTFs patchados flat (sem subpastas)
             mkdir -p "release/$FAMILY"
             find "fixed/$FAMILY" -type f -name "*.ttf" \
               -exec cp {} "release/$FAMILY/" \;
-
             cd release
-            zip -r  "${FAMILY}.zip"    "$FAMILY"
-            tar -cJf "${FAMILY}.tar.xz" "$FAMILY"
+            zip -r "${FAMILY}.zip" "$FAMILY"
             cd ..
           }
 
@@ -180,13 +123,8 @@ jobs:
 
       - name: Generate checksums
         working-directory: release
-        run: sha256sum *.zip *.tar.xz > SHA256SUMS.txt
+        run: sha256sum *.zip > SHA256SUMS.txt
 
-      - name: Cleanup temporary files
-        run: |
-          rm -rf iosevka-src patched nerd-fonts-patcher FontPatcher.zip
-
-      # ── Release ─────────────────────────────────────────────────────────
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
@@ -194,7 +132,6 @@ jobs:
           generate_release_notes: true
           files: |
             release/*.zip
-            release/*.tar.xz
             release/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
