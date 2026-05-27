@@ -1,249 +1,202 @@
 name: Build and Release Font
 
 on:
+  workflow_dispatch:
   push:
     tags:
-      - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version tag (e.g. v2.0.0)"
-        required: false
-        default: "v0.0.0-test"
+      - 'v*'
+
+concurrency:
+  group: iosevka-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  FONT_NAME: IoskeleyMono
+  NODE_VERSION: 22
+  PYTHON_VERSION: '3.12'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 240
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Checkout Iosevka source
-        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          repository: be5invis/Iosevka
-          path: iosevka-src
-          fetch-depth: 1
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: iosevka-src/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ttfautohint python3 python3-pip fontforge
-          pip3 install fonttools --break-system-packages
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            zip unzip xz-utils p7zip-full \
+            fontforge python3-fontforge ttfautohint
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Build font
+      - name: Install Python dependencies
         run: |
-          cp private-build-plans.toml iosevka-src/
-          cd iosevka-src
-          npm install
-          npm run build -- contents::IoskeleyMono contents::IoskeleyMonoNL contents::IoskeleyMonoFixed
+          python -m pip install --upgrade pip
+          python -m pip install fonttools brotli zopfli
 
-      - name: Verify build output
+      - name: Clone Iosevka source
         run: |
-          if [ ! -d "iosevka-src/dist/IoskeleyMono/TTF" ] || [ ! -d "iosevka-src/dist/IoskeleyMono/WOFF2" ]; then
-            echo "IoskeleyMono build output not found!"
-            exit 1
-          fi
-          if [ ! -d "iosevka-src/dist/IoskeleyMonoNL/TTF" ]; then
-            echo "IoskeleyMonoNL build output not found!"
-            exit 1
-          fi
-          if [ ! -d "iosevka-src/dist/IoskeleyMonoFixed/TTF" ]; then
-            echo "IoskeleyMonoFixed build output not found!"
-            exit 1
-          fi
+          git clone --depth=1 \
+            https://github.com/be5invis/Iosevka.git \
+            iosevka-src
 
+      - name: Install npm dependencies
+        working-directory: iosevka-src
+        run: npm install
+
+      - name: Copy private build plans
+        run: cp private-build-plans.toml iosevka-src/
+
+      # ── Validação rápida — só Regular SemiCondensed Upright ────────────
+      - name: Validate build configuration
+        working-directory: iosevka-src
+        run: |
+          echo "Fast validation: Regular SemiCondensed Upright only..."
+          npm run build -- \
+            "ttf::IoskeleyMono{weight=Regular,width=SemiCondensed,slope=Upright}"
+          echo "Validation passed."
+
+      - name: Clean validation artifacts
+        run: rm -rf iosevka-src/dist
+
+      # ── Build completo ──────────────────────────────────────────────────
+      - name: Build all font families
+        working-directory: iosevka-src
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+        run: |
+          npm run build -- \
+            ttf::IoskeleyMono \
+            ttf::IoskeleyMonoNL \
+            ttf::IoskeleyMonoFixed
+
+      - name: Verify output structure
+        run: |
+          test -d iosevka-src/dist/IoskeleyMono/TTF
+          test -d iosevka-src/dist/IoskeleyMonoNL/TTF
+          test -d iosevka-src/dist/IoskeleyMonoFixed/TTF
+          echo "Build output verified."
+
+      # ── Nerd Fonts patcher ──────────────────────────────────────────────
       - name: Download Nerd Fonts patcher
         run: |
-          curl -sL "$(gh api repos/ryanoasis/nerd-fonts/releases/latest --jq '.assets[] | select(.name == "FontPatcher.zip") | .browser_download_url')" -o FontPatcher.zip
+          NF_VERSION=$(gh api repos/ryanoasis/nerd-fonts/releases/latest \
+            --jq '.tag_name')
+          echo "Nerd Fonts patcher $NF_VERSION"
+          curl -sL \
+            "https://github.com/ryanoasis/nerd-fonts/releases/download/${NF_VERSION}/FontPatcher.zip" \
+            -o FontPatcher.zip
           unzip -q FontPatcher.zip -d nerd-fonts-patcher
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Patch fonts with Nerd Font glyphs
+      # ── Patch paralelo ──────────────────────────────────────────────────
+      - name: Patch Nerd Fonts
+        shell: bash
         run: |
-          mkdir -p patched-fonts/Normal patched-fonts/SemiCondensed patched-fonts/Condensed
-          mkdir -p patched-fonts-fixed/Normal patched-fonts-fixed/SemiCondensed patched-fonts-fixed/Condensed
-          mkdir -p patched-fonts-nl/Normal patched-fonts-nl/SemiCondensed patched-fonts-nl/Condensed
+          set -e
+          mkdir -p patched/IoskeleyMono \
+                   patched/IoskeleyMonoNL \
+                   patched/IoskeleyMonoFixed
 
-          DIST="iosevka-src/dist/IoskeleyMono/TTF"
-          DIST_FIXED="iosevka-src/dist/IoskeleyMonoFixed/TTF"
-          DIST_NL="iosevka-src/dist/IoskeleyMonoNL/TTF"
           PATCHER="nerd-fonts-patcher/font-patcher"
 
-          # IoskeleyMono
-          for font in "$DIST"/IoskeleyMono-SemiCondensed*.ttf; do
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts/SemiCondensed
-          done
-          for font in "$DIST"/IoskeleyMono-Condensed*.ttf; do
-            [[ "$font" == *SemiCondensed* ]] && continue
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts/Condensed
-          done
-          for font in "$DIST"/IoskeleyMono-*.ttf; do
-            [[ "$font" == *Condensed* ]] && continue
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts/Normal
-          done
+          patch_family () {
+            FAMILY="$1"
+            echo "Patching $FAMILY..."
+            find "iosevka-src/dist/$FAMILY/TTF" \
+              -maxdepth 1 -type f -name "*.ttf" \
+              | while read FONT; do
+                fontforge -script "$PATCHER" \
+                  "$FONT" \
+                  --complete --quiet --no-progressbars \
+                  --outputdir "patched/$FAMILY" 2>/dev/null
+              done
+            echo "Done: $FAMILY"
+          }
 
-          # IoskeleyMonoFixed
-          for font in "$DIST_FIXED"/IoskeleyMonoFixed-SemiCondensed*.ttf; do
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-fixed/SemiCondensed
-          done
-          for font in "$DIST_FIXED"/IoskeleyMonoFixed-Condensed*.ttf; do
-            [[ "$font" == *SemiCondensed* ]] && continue
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-fixed/Condensed
-          done
-          for font in "$DIST_FIXED"/IoskeleyMonoFixed-*.ttf; do
-            [[ "$font" == *Condensed* ]] && continue
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-fixed/Normal
-          done
+          export -f patch_family
 
-          # IoskeleyMonoNL
-          for font in "$DIST_NL"/IoskeleyMonoNL-SemiCondensed*.ttf; do
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-nl/SemiCondensed
-          done
-          for font in "$DIST_NL"/IoskeleyMonoNL-Condensed*.ttf; do
-            [[ "$font" == *SemiCondensed* ]] && continue
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-nl/Condensed
-          done
-          for font in "$DIST_NL"/IoskeleyMonoNL-*.ttf; do
-            [[ "$font" == *Condensed* ]] && continue
-            fontforge -script "$PATCHER" "$font" --complete --careful --outputdir patched-fonts-nl/Normal
-          done
+          patch_family "IoskeleyMono"    &
+          patch_family "IoskeleyMonoNL"  &
+          patch_family "IoskeleyMonoFixed" &
+          wait
+          echo "All families patched."
 
+      # ── Fix icon sizes ──────────────────────────────────────────────────
       - name: Fix Nerd Font icon sizes
         run: |
-          cp fix-nerd-fonts.py /tmp/fix-nerd-fonts.py
+          mkdir -p fixed
+          python fix-nerd-fonts.py patched fixed
+          echo "Icon sizes fixed."
 
-          python3 /tmp/fix-nerd-fonts.py patched-fonts         patched-fonts-fixed-icons
-          python3 /tmp/fix-nerd-fonts.py patched-fonts-fixed   patched-fonts-fixed-fixed-icons
-          python3 /tmp/fix-nerd-fonts.py patched-fonts-nl      patched-fonts-nl-fixed-icons
+      - name: Verify patched fonts
+        run: |
+          test -d fixed/IoskeleyMono
+          test -d fixed/IoskeleyMonoNL
+          test -d fixed/IoskeleyMonoFixed
+          echo "Patched fonts verified."
 
-          rm -rf patched-fonts patched-fonts-fixed patched-fonts-nl
-          mv patched-fonts-fixed-icons       patched-fonts
-          mv patched-fonts-fixed-fixed-icons patched-fonts-fixed
-          mv patched-fonts-nl-fixed-icons    patched-fonts-nl
-
+      # ── Empacota flat (sem Hinted/Unhinted) ─────────────────────────────
       - name: Package release archives
+        shell: bash
         run: |
-          DIST="iosevka-src/dist/IoskeleyMono"
-          DIST_FIXED="iosevka-src/dist/IoskeleyMonoFixed"
-          DIST_NL="iosevka-src/dist/IoskeleyMonoNL"
+          set -e
+          mkdir -p release
 
-          # ── IoskeleyMono.zip ──────────────────────────────────────────────
-          mkdir -p pkg/Normal/Hinted        pkg/Normal/Unhinted
-          mkdir -p pkg/SemiCondensed/Hinted pkg/SemiCondensed/Unhinted
-          mkdir -p pkg/Condensed/Hinted     pkg/Condensed/Unhinted
+          package_family () {
+            FAMILY="$1"
+            echo "Packaging $FAMILY..."
 
-          cp "$DIST"/TTF/IoskeleyMono-SemiCondensed*.ttf          pkg/SemiCondensed/Hinted/
-          cp "$DIST"/TTF-Unhinted/IoskeleyMono-SemiCondensed*.ttf pkg/SemiCondensed/Unhinted/
-          for f in "$DIST"/TTF/IoskeleyMono-Condensed*.ttf;          do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg/Condensed/Hinted/;   done
-          for f in "$DIST"/TTF-Unhinted/IoskeleyMono-Condensed*.ttf; do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg/Condensed/Unhinted/; done
-          for f in "$DIST"/TTF/IoskeleyMono-*.ttf;                   do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg/Normal/Hinted/;       done
-          for f in "$DIST"/TTF-Unhinted/IoskeleyMono-*.ttf;          do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg/Normal/Unhinted/;     done
-          cd pkg && zip -r ../IoskeleyMono.zip . && cd ..
+            # Copia todos os TTFs patchados flat (sem subpastas)
+            mkdir -p "release/$FAMILY"
+            find "fixed/$FAMILY" -type f -name "*.ttf" \
+              -exec cp {} "release/$FAMILY/" \;
 
-          # ── IoskeleyMono-NerdFont.zip ─────────────────────────────────────
-          mkdir -p pkg-nf/Normal pkg-nf/SemiCondensed pkg-nf/Condensed
-          cp patched-fonts/Normal/*.ttf        pkg-nf/Normal/
-          cp patched-fonts/SemiCondensed/*.ttf pkg-nf/SemiCondensed/
-          cp patched-fonts/Condensed/*.ttf     pkg-nf/Condensed/
-          cd pkg-nf && zip -r ../IoskeleyMono-NerdFont.zip . && cd ..
+            cd release
+            zip -r  "${FAMILY}.zip"    "$FAMILY"
+            tar -cJf "${FAMILY}.tar.xz" "$FAMILY"
+            cd ..
+          }
 
-          # ── IoskeleyMono-Fixed.zip ────────────────────────────────────────
-          mkdir -p pkg-fixed/Normal/Hinted        pkg-fixed/Normal/Unhinted
-          mkdir -p pkg-fixed/SemiCondensed/Hinted pkg-fixed/SemiCondensed/Unhinted
-          mkdir -p pkg-fixed/Condensed/Hinted     pkg-fixed/Condensed/Unhinted
+          package_family "IoskeleyMono"
+          package_family "IoskeleyMonoNL"
+          package_family "IoskeleyMonoFixed"
 
-          cp "$DIST_FIXED"/TTF/IoskeleyMonoFixed-SemiCondensed*.ttf          pkg-fixed/SemiCondensed/Hinted/
-          cp "$DIST_FIXED"/TTF-Unhinted/IoskeleyMonoFixed-SemiCondensed*.ttf pkg-fixed/SemiCondensed/Unhinted/
-          for f in "$DIST_FIXED"/TTF/IoskeleyMonoFixed-Condensed*.ttf;          do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-fixed/Condensed/Hinted/;   done
-          for f in "$DIST_FIXED"/TTF-Unhinted/IoskeleyMonoFixed-Condensed*.ttf; do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-fixed/Condensed/Unhinted/; done
-          for f in "$DIST_FIXED"/TTF/IoskeleyMonoFixed-*.ttf;                   do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-fixed/Normal/Hinted/;       done
-          for f in "$DIST_FIXED"/TTF-Unhinted/IoskeleyMonoFixed-*.ttf;          do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-fixed/Normal/Unhinted/;     done
-          cd pkg-fixed && zip -r ../IoskeleyMono-Fixed.zip . && cd ..
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum *.zip *.tar.xz > SHA256SUMS.txt
 
-          # ── IoskeleyMono-Fixed-NerdFont.zip ──────────────────────────────
-          mkdir -p pkg-fixed-nf/Normal pkg-fixed-nf/SemiCondensed pkg-fixed-nf/Condensed
-          cp patched-fonts-fixed/Normal/*.ttf        pkg-fixed-nf/Normal/
-          cp patched-fonts-fixed/SemiCondensed/*.ttf pkg-fixed-nf/SemiCondensed/
-          cp patched-fonts-fixed/Condensed/*.ttf     pkg-fixed-nf/Condensed/
-          cd pkg-fixed-nf && zip -r ../IoskeleyMono-Fixed-NerdFont.zip . && cd ..
-
-          # ── IoskeleyMono-NL.zip ───────────────────────────────────────────
-          mkdir -p pkg-nl/Normal/Hinted        pkg-nl/Normal/Unhinted
-          mkdir -p pkg-nl/SemiCondensed/Hinted pkg-nl/SemiCondensed/Unhinted
-          mkdir -p pkg-nl/Condensed/Hinted     pkg-nl/Condensed/Unhinted
-
-          cp "$DIST_NL"/TTF/IoskeleyMonoNL-SemiCondensed*.ttf          pkg-nl/SemiCondensed/Hinted/
-          cp "$DIST_NL"/TTF-Unhinted/IoskeleyMonoNL-SemiCondensed*.ttf pkg-nl/SemiCondensed/Unhinted/
-          for f in "$DIST_NL"/TTF/IoskeleyMonoNL-Condensed*.ttf;          do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-nl/Condensed/Hinted/;   done
-          for f in "$DIST_NL"/TTF-Unhinted/IoskeleyMonoNL-Condensed*.ttf; do [[ "$f" == *SemiCondensed* ]] && continue; cp "$f" pkg-nl/Condensed/Unhinted/; done
-          for f in "$DIST_NL"/TTF/IoskeleyMonoNL-*.ttf;                   do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-nl/Normal/Hinted/;       done
-          for f in "$DIST_NL"/TTF-Unhinted/IoskeleyMonoNL-*.ttf;          do [[ "$f" == *Condensed* ]]     && continue; cp "$f" pkg-nl/Normal/Unhinted/;     done
-          cd pkg-nl && zip -r ../IoskeleyMono-NL.zip . && cd ..
-
-          # ── IoskeleyMono-NL-NerdFont.zip ──────────────────────────────────
-          mkdir -p pkg-nl-nf/Normal pkg-nl-nf/SemiCondensed pkg-nl-nf/Condensed
-          cp patched-fonts-nl/Normal/*.ttf        pkg-nl-nf/Normal/
-          cp patched-fonts-nl/SemiCondensed/*.ttf pkg-nl-nf/SemiCondensed/
-          cp patched-fonts-nl/Condensed/*.ttf     pkg-nl-nf/Condensed/
-          cd pkg-nl-nf && zip -r ../IoskeleyMono-NL-NerdFont.zip . && cd ..
-
-      - name: Package Web archive
+      - name: Cleanup temporary files
         run: |
-          cd iosevka-src/dist/IoskeleyMono
-          zip -r ../../../IoskeleyMono-Web.zip WOFF2 WOFF2-Unhinted
+          rm -rf iosevka-src patched nerd-fonts-patcher FontPatcher.zip
 
-      - name: Set release version
-        id: vars
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
+      # ── Release ─────────────────────────────────────────────────────────
       - name: Create Release and Upload Assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: "Ioskeley Mono ${{ steps.vars.outputs.tag }}"
           draft: ${{ github.event_name == 'workflow_dispatch' }}
-          body: |
-            ## Ioskeley Mono ${{ steps.vars.outputs.tag }}
-
-            <!-- What's new in this release -->
-
-            ---
-
-            ### Downloads
-
-            | Situation | Download |
-            |---|---|
-            | Editor / IDE | `IoskeleyMono.zip` |
-            | Terminal with icons | `IoskeleyMono-NerdFont.zip` |
-            | Stricter terminal rendering | `IoskeleyMono-Fixed.zip` |
-            | Stricter terminal + icons | `IoskeleyMono-Fixed-NerdFont.zip` |
-            | App that can't disable ligatures | `IoskeleyMono-NL.zip` |
-            | Same + Nerd Font icons | `IoskeleyMono-NL-NerdFont.zip` |
-            | Web | `IoskeleyMono-Web.zip` |
-
-            Not sure which to pick? [See the README](https://github.com/lumaXs/IoskeleyMono#which-file-do-i-need).
+          generate_release_notes: true
           files: |
-            IoskeleyMono.zip
-            IoskeleyMono-NerdFont.zip
-            IoskeleyMono-Fixed.zip
-            IoskeleyMono-Fixed-NerdFont.zip
-            IoskeleyMono-NL.zip
-            IoskeleyMono-NL-NerdFont.zip
-            IoskeleyMono-Web.zip
+            release/*.zip
+            release/*.tar.xz
+            release/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
